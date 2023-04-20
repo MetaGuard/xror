@@ -3,7 +3,7 @@ import fpzip
 import bson
 import time
 import datetime
-from Bsor import make_bsor
+from .Bsor import make_bsor
 from copy import deepcopy
 
 class XROR:
