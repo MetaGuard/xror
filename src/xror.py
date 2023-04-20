@@ -3,7 +3,7 @@ import fpzip
 import bson
 import time
 import datetime
-from bsor.Bsor import make_bsor
+from Bsor import make_bsor
 from copy import deepcopy
 
 class XROR:
@@ -103,6 +103,7 @@ class XROR:
         if ('floatData' not in self.data['events'][idx]): return []
         keys = ['time'] + self.data['events'][idx]['attr']
         for i in range(len(self.data['events'][idx]['floatData'])):
+            if self.data['events'][idx]['floatData'][i][0] == -1: continue
             event = {}
             for j in range(len(self.data['events'][idx]['floatData'][i])):
                 event[keys[j]] = self.data['events'][idx]['floatData'][i][j]
@@ -113,26 +114,37 @@ class XROR:
         return events
 
     def pack(self):
+        def compress(array):
+            try:
+                floats = np.array(array, dtype=np.float32)
+                bytes = fpzip.compress(floats)
+                return bson.binary.Binary(bytes)
+            except:
+                floats = np.array(array, dtype=np.float32)
+                padding = np.array(np.full(np.shape(array), -1))
+                padded = np.vstack([floats, padding, padding])
+                bytes = fpzip.compress(padded)
+                return bson.binary.Binary(bytes)
+
         data = deepcopy(self.data)
 
         if ('timestamp' in data['info']): data['info']['timestamp'] = datetime.datetime.fromtimestamp(data['info']['timestamp'], datetime.timezone.utc)
 
-        frames = np.array(data['frames'], dtype=np.float32)
-        bytes = fpzip.compress(frames)
-        data['frames'] = bson.binary.Binary(bytes)
+        data['frames'] = compress(data['frames'])
 
         for i in range(len(data['events'])):
             if ('floatData' in data['events'][i]):
-                floats = np.array(data['events'][i]['floatData'], dtype=np.float32)
-                bytes = fpzip.compress(floats)
-                data['events'][i]['floatData'] = bson.binary.Binary(bytes)
+                data['events'][i]['floatData'] = compress(data['events'][i]['floatData'])
 
         return bson.encode(data)
 
     def toBSOR(self):
         bytes = bytearray()
-        def addInt(int):
-            bytes.extend(int.to_bytes(4, 'little'));
+        def addInt(i):
+            bytes.extend(int(i).to_bytes(4, 'little'));
+
+        def addLong(i):
+            bytes.extend(int(i).to_bytes(8, 'little'));
 
         def addFloat(float):
             bytes.extend(np.array([float], dtype=np.float32).tobytes());
@@ -141,8 +153,9 @@ class XROR:
             bytes.extend(byte.to_bytes(1, 'little'))
 
         def addString(str):
+            enc = str.encode('utf-8')
             addInt(len(str))
-            bytes.extend(str.encode('utf-8'))
+            bytes.extend(enc)
 
         # Info Structure
         addInt(0x442d3d69)
@@ -152,11 +165,11 @@ class XROR:
         addString(self.data['info']['software']['app']['version'])
         addString(str(self.data['info']['timestamp']))
         addString(self.data['info']['user']['id'])
-        addString(self.data['info']['user']['name'])
-        addString(self.data['info']['software']['api'])
+        addString(self.data['info']['user']['name'] if 'name' in self.data['info']['user'] else '')
         addString(self.data['info']['software']['runtime'])
-        addString(self.data['info']['hardware']['devices'][0]['name'])
-        addString(self.data['info']['hardware']['devices'][2]['name'])
+        addString(self.data['info']['software']['api'])
+        addString(self.data['info']['hardware']['devices'][0]['name'] if 'name' in self.data['info']['hardware']['devices'][0] else '')
+        addString(self.data['info']['hardware']['devices'][2]['name'] if 'name' in self.data['info']['hardware']['devices'][2] else '')
         for attr in ['songHash', 'name', 'mapper', 'difficulty']:
             addString(self.data['info']['software']['activity'][attr])
         addInt(self.data['info']['software']['activity']['score'])
@@ -164,7 +177,8 @@ class XROR:
         addString(self.data['info']['software']['environment']['name'])
         if ('modifiers' in self.data['info']['software']['activity']): addString(self.data['info']['software']['activity']['modifiers'])
         else: addString("")
-        addFloat(self.data['info']['software']['activity']['jumpDistance'])
+        if ('jumpDistance' in self.data['info']['software']['activity']): addFloat(self.data['info']['software']['activity']['jumpDistance'])
+        else: addFloat(0.0)
         if ('leftHanded' in self.data['info']['software']['activity']): addByte(self.data['info']['software']['activity']['leftHanded'])
         else: addByte(False)
 
@@ -193,15 +207,10 @@ class XROR:
             c['speedOK'] = True
             c['directionOK'] = True
             c['saberTypeOK'] = True
-            c['saberType'] = (c['noteID'] // 10) % 10
             c['wasCutTooSoon'] = False
         bc = self.getEvents('bc')
         for c in bc:
             c['eventType'] = 1
-            c['saberType'] = (c['noteID'] // 10) % 10
-            if (not c['saberTypeOK']):
-                if c['saberType'] == 0: c['saberType'] = 1
-                else: c['saberType'] = 0
         m = self.getEvents('m')
         for c in m:
             c['eventType'] = 2
@@ -209,18 +218,30 @@ class XROR:
         for c in b:
             c['eventType'] = 3
         notes = sum([gc, bc, m, b], [])
-        notes = sorted(notes, key=lambda d: d['time'])
+        if ('order' in notes[0]): notes = sorted(notes, key=lambda d: d['order'])
+        else: notes = sorted(notes, key=lambda d: d['time'])
+        g = self.getEvents('g')
+        gi = 0
         addInt(len(notes))
         for note in notes:
             addInt(note['noteID'])
             addFloat(note['time'])
             addFloat(note['spawnTime'])
             addInt(note['eventType'])
-            if (note['eventType'] == 0 or note['eventType'] == 1):
+            if (note['eventType'] == 0 or (note['eventType'] == 1 and self.data['info']['software']['runtime'] != "oculus")):
                 for attr in ['speedOK', 'directionOK', 'saberTypeOK', 'wasCutTooSoon']: addByte(note[attr])
                 for attr in ['saberSpeed', 'saberDirX', 'saberDirY', 'saberDirZ']: addFloat(note[attr])
                 addInt(note['saberType'])
                 for attr in ['timeDeviation', 'cutDirDeviation', 'cutPointX', 'cutPointY', 'cutPointZ', 'cutNormalX', 'cutNormalY', 'cutNormalZ', 'cutDistanceToCenter', 'cutAngle', 'beforeCutRating', 'afterCutRating']: addFloat(note[attr])
+            elif (note['eventType'] == 1 and self.data['info']['software']['runtime'] == "oculus"):
+                if (g):
+                    bytes.extend(g[gi]['data'])
+                    gi += 1
+                else:
+                    for attr in ['speedOK', 'directionOK', 'saberTypeOK', 'wasCutTooSoon']: addByte(0)
+                    for attr in ['saberSpeed', 'saberDirX', 'saberDirY', 'saberDirZ']: addFloat(0.0)
+                    addInt(0.0)
+                    for attr in ['timeDeviation', 'cutDirDeviation', 'cutPointX', 'cutPointY', 'cutPointZ', 'cutNormalX', 'cutNormalY', 'cutNormalZ', 'cutDistanceToCenter', 'cutAngle', 'beforeCutRating', 'afterCutRating']: addFloat(0.0)
 
         # Walls Array
         addByte(3)
@@ -245,7 +266,7 @@ class XROR:
         pauses = self.getEvents('p')
         addInt(len(pauses))
         for pause in pauses:
-            addFloat(pause['duration'])
+            addLong(pause['duration'])
             addFloat(pause['time'])
 
         return bytes
@@ -269,7 +290,7 @@ class XROR:
         return xror
 
     @classmethod
-    def fromBSOR(XROR, data, addFPS = False):
+    def fromBSOR(XROR, data, addFPS = False, addOrder = False, addGarbage = False):
         bsor = make_bsor(data)
         xror = XROR(timestamp = bsor.info.timestamp)
 
@@ -284,8 +305,8 @@ class XROR:
         xror.setUser(id = bsor.info.playerId, name = bsor.info.playerName)
         for attr in ['songHash', 'mapper', 'difficulty', 'score', 'mode', 'modifiers', 'jumpDistance', 'leftHanded', 'height', 'startTime', 'failTime', 'speed']:
             if (getattr(bsor.info, attr)): xror.data['info']['software']['activity'][attr] = getattr(bsor.info, attr)
-        xror.data['info']['software']['runtime'] = bsor.info.trackingSystem
-        xror.data['info']['software']['api'] = bsor.info.platform
+        xror.data['info']['software']['runtime'] = bsor.info.platform
+        xror.data['info']['software']['api'] = bsor.info.trackingSystem
 
         for frame in bsor.frames:
             data = []
@@ -294,20 +315,39 @@ class XROR:
                     data.append(getattr(getattr(frame, obj), axis))
             xror.addFrame(frame.time, data)
 
-        xror.addEventType(id = 'gc', name = 'Good Cut', attr = ['spawnTime', 'saberSpeed', 'saberDirX', 'saberDirY', 'saberDirZ', 'timeDeviation', 'cutDirDeviation', 'cutPointX', 'cutPointY', 'cutPointZ', 'cutNormalX', 'cutNormalY', 'cutNormalZ', 'cutDistanceToCenter', 'cutAngle', 'beforeCutRating', 'afterCutRating', 'noteID']);
-        xror.addEventType(id = 'bc', name = 'Bad Cut', attr = ['spawnTime', 'saberSpeed', 'saberDirX', 'saberDirY', 'saberDirZ', 'timeDeviation', 'cutDirDeviation', 'cutPointX', 'cutPointY', 'cutPointZ', 'cutNormalX', 'cutNormalY', 'cutNormalZ', 'cutDistanceToCenter', 'cutAngle', 'beforeCutRating', 'afterCutRating', 'noteID', 'speedOK', 'directionOK', 'saberTypeOK', 'wasCutTooSoon']);
-        xror.addEventType(id = 'm', name = 'Miss', attr = ['spawnTime', 'noteID']);
-        xror.addEventType(id = 'b', name = 'Bomb Cut', attr = ['spawnTime', 'noteID']);
+        if addOrder:
+            xror.addEventType(id = 'gc', name = 'Good Cut', attr = ['spawnTime', 'saberSpeed', 'saberDirX', 'saberDirY', 'saberDirZ', 'timeDeviation', 'cutDirDeviation', 'cutPointX', 'cutPointY', 'cutPointZ', 'cutNormalX', 'cutNormalY', 'cutNormalZ', 'cutDistanceToCenter', 'cutAngle', 'beforeCutRating', 'afterCutRating', 'noteID', 'saberType', 'order']);
+            if (bsor.info.platform == "oculus"):
+                xror.addEventType(id = 'bc', name = 'Bad Cut', attr = ['spawnTime', 'noteID', 'order']);
+                if (addGarbage): xror.addEventType(id = 'g', name = 'Garbage', attr = ['data']);
+            else:
+                xror.addEventType(id = 'bc', name = 'Bad Cut', attr = ['spawnTime', 'saberSpeed', 'saberDirX', 'saberDirY', 'saberDirZ', 'timeDeviation', 'cutDirDeviation', 'cutPointX', 'cutPointY', 'cutPointZ', 'cutNormalX', 'cutNormalY', 'cutNormalZ', 'cutDistanceToCenter', 'cutAngle', 'beforeCutRating', 'afterCutRating', 'noteID', 'speedOK', 'directionOK', 'saberTypeOK', 'wasCutTooSoon', 'saberType', 'order']);
+            xror.addEventType(id = 'm', name = 'Miss', attr = ['spawnTime', 'noteID', 'order']);
+            xror.addEventType(id = 'b', name = 'Bomb Cut', attr = ['spawnTime', 'noteID', 'order']);
+        else:
+            xror.addEventType(id = 'gc', name = 'Good Cut', attr = ['spawnTime', 'saberSpeed', 'saberDirX', 'saberDirY', 'saberDirZ', 'timeDeviation', 'cutDirDeviation', 'cutPointX', 'cutPointY', 'cutPointZ', 'cutNormalX', 'cutNormalY', 'cutNormalZ', 'cutDistanceToCenter', 'cutAngle', 'beforeCutRating', 'afterCutRating', 'noteID', 'saberType']);
+            if (bsor.info.platform == "oculus"):
+                xror.addEventType(id = 'bc', name = 'Bad Cut', attr = ['spawnTime', 'noteID']);
+                if (addGarbage): xror.addEventType(id = 'g', name = 'Garbage', attr = ['data']);
+            else:
+                xror.addEventType(id = 'bc', name = 'Bad Cut', attr = ['spawnTime', 'saberSpeed', 'saberDirX', 'saberDirY', 'saberDirZ', 'timeDeviation', 'cutDirDeviation', 'cutPointX', 'cutPointY', 'cutPointZ', 'cutNormalX', 'cutNormalY', 'cutNormalZ', 'cutDistanceToCenter', 'cutAngle', 'beforeCutRating', 'afterCutRating', 'noteID', 'speedOK', 'directionOK', 'saberTypeOK', 'wasCutTooSoon', 'saberType']);
+            xror.addEventType(id = 'm', name = 'Miss', attr = ['spawnTime', 'noteID']);
+            xror.addEventType(id = 'b', name = 'Bomb Cut', attr = ['spawnTime', 'noteID']);
 
-        for note in bsor.notes:
+
+        for [idx, note] in enumerate(bsor.notes):
             if note.event_type == 0:
-                xror.addEvent('gc', note.event_time, [note.spawn_time, note.cut.saberSpeed, note.cut.saberDirection[0], note.cut.saberDirection[1], note.cut.saberDirection[2], note.cut.timeDeviation, note.cut.cutDeviation, note.cut.cutPoint[0], note.cut.cutPoint[1], note.cut.cutPoint[2], note.cut.cutNormal[0], note.cut.cutNormal[1], note.cut.cutNormal[2], note.cut.cutDistanceToCenter, note.cut.cutAngle], [note.cut.beforeCutRating, note.cut.afterCutRating, note.note_id])
+                xror.addEvent('gc', note.event_time, [note.spawn_time, note.cut.saberSpeed, note.cut.saberDirection[0], note.cut.saberDirection[1], note.cut.saberDirection[2], note.cut.timeDeviation, note.cut.cutDeviation, note.cut.cutPoint[0], note.cut.cutPoint[1], note.cut.cutPoint[2], note.cut.cutNormal[0], note.cut.cutNormal[1], note.cut.cutNormal[2], note.cut.cutDistanceToCenter, note.cut.cutAngle], [note.cut.beforeCutRating, note.cut.afterCutRating, note.note_id, note.cut.saberType, idx] if addOrder else [note.cut.beforeCutRating, note.cut.afterCutRating, note.note_id, note.cut.saberType])
             if note.event_type == 1:
-                xror.addEvent('bc', note.event_time, [note.spawn_time, note.cut.saberSpeed, note.cut.saberDirection[0], note.cut.saberDirection[1], note.cut.saberDirection[2], note.cut.timeDeviation, note.cut.cutDeviation, note.cut.cutPoint[0], note.cut.cutPoint[1], note.cut.cutPoint[2], note.cut.cutNormal[0], note.cut.cutNormal[1], note.cut.cutNormal[2], note.cut.cutDistanceToCenter, note.cut.cutAngle], [note.cut.beforeCutRating, note.cut.afterCutRating, note.note_id, note.cut.speedOK, note.cut.directionOk, note.cut.saberTypeOk, note.cut.wasCutTooSoon])
+                if (bsor.info.platform == "oculus"):
+                    xror.addEvent('bc', note.event_time, [note.spawn_time], [note.note_id, idx] if addOrder else [note.note_id])
+                    if (addGarbage): xror.addEvent('g', note.event_time, [], [note.garbage])
+                else:
+                    xror.addEvent('bc', note.event_time, [note.spawn_time, note.cut.saberSpeed, note.cut.saberDirection[0], note.cut.saberDirection[1], note.cut.saberDirection[2], note.cut.timeDeviation, note.cut.cutDeviation, note.cut.cutPoint[0], note.cut.cutPoint[1], note.cut.cutPoint[2], note.cut.cutNormal[0], note.cut.cutNormal[1], note.cut.cutNormal[2], note.cut.cutDistanceToCenter, note.cut.cutAngle], [note.cut.beforeCutRating, note.cut.afterCutRating, note.note_id, note.cut.speedOK, note.cut.directionOk, note.cut.saberTypeOk, note.cut.wasCutTooSoon, note.cut.saberType, idx] if addOrder else [note.cut.beforeCutRating, note.cut.afterCutRating, note.note_id, note.cut.speedOK, note.cut.directionOk, note.cut.saberTypeOk, note.cut.wasCutTooSoon, note.cut.saberType])
             if note.event_type == 2:
-                xror.addEvent('m', note.event_time, [note.spawn_time], [note.note_id])
+                xror.addEvent('m', note.event_time, [note.spawn_time], [note.note_id, idx] if addOrder else [note.note_id])
             if note.event_type == 3:
-                xror.addEvent('b', note.event_time, [note.spawn_time], [note.note_id])
+                xror.addEvent('b', note.event_time, [note.spawn_time], [note.note_id, idx] if addOrder else [note.note_id])
 
         xror.addEventType(id = 'wh', name = 'Wall Hit', attr = ['energy', 'spawnTime', 'wallID'])
         for wall in bsor.walls:
@@ -319,7 +359,7 @@ class XROR:
 
         xror.addEventType(id = 'p', name = 'Pause', attr = ['duration'])
         for pause in bsor.pauses:
-            xror.addEvent('h', pause.time, otherData=[pause.duration])
+            xror.addEvent('p', pause.time, otherData=[pause.duration])
 
         if (addFPS):
             xror.addEventType(id = 'f', name = 'FPS', attr = ['fps'])
