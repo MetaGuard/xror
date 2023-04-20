@@ -9,15 +9,15 @@ from src.xror import XROR
 import numpy as np
 
 def test_bsor():
-    with open('./data/sample2.bsor', 'rb') as f:
+    with open('./data/bsor/sample2.bsor', 'rb') as f:
         first = XROR.fromBSOR(f, addFPS = True, addOrder = True, addGarbage = True)
 
     data = first.pack()
 
-    with open('./data/sample2.xror', 'wb') as f:
+    with open('./data/bsor/sample2.xror', 'wb') as f:
         f.write(data)
 
-    with open('./data/sample2.xror', 'rb') as f:
+    with open('./data/bsor/sample2.xror', 'rb') as f:
         file = f.read()
 
     second = XROR.unpack(file)
@@ -27,12 +27,12 @@ def test_bsor():
     assert diff == {}
 
     output = second.toBSOR()
-    with open('./data/output2.bsor', 'wb') as f:
+    with open('./data/bsor/output2.bsor', 'wb') as f:
         f.write(output)
 
-    with open('./data/sample2.bsor', 'rb') as f:
+    with open('./data/bsor/sample2.bsor', 'rb') as f:
         a = f.read()
-    with open('./data/output2.bsor', 'rb') as f:
+    with open('./data/bsor/output2.bsor', 'rb') as f:
         b = f.read()
 
     assert a == b
