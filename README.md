@@ -60,10 +60,20 @@ It is not strictly necessary to follow this convention. However, if you choose t
 
 ![Unity's left-handed, y-up coordinate system](coord.png)
 
+## Installation
+
+Install with 
+
+```bash
+pip install git+https://github.com/MetaGuard/xror.git#egg=xror
+```
+
 ## Usage Examples
 
 Create and save a basic XROR file:
 ```
+from xror import XROR
+
 xror = XROR(name = 'Example')
 xror.addDevice(name = 'HAND', type = 'HAND', axes = ['x', 'y', 'z'])
 xror.addFrame(0, [1.0, 1.5, 2.0])
