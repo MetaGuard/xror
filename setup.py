@@ -4,7 +4,7 @@ from setuptools import find_packages, setup
 
 setup(
     name="XROR",
-    version="0.0.1",
+    version="1.0.0",
     description="Extended Reality Open Replay (XROR)",
     author="Vivek Nair",
     author_email="vivek@nair.me",
