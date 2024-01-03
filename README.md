@@ -48,6 +48,18 @@ When opening an XROR file with a standard BSON reader, the following attributes 
 
 XROR files are sparse, meaning that most attributes are optional, and also extensible, meaning that attributes beyond those listed above may also be included.
 
+## Conventions
+
+By convention, XROR files with 3DOF or 6DOF tracked objects use Unity's (left-handed, y-up) coordinate system, shown below. In this coordinate system, _1.0 units equals 1.0 meters_ of real-world distance. When looking from the origin in the +Z direction:
+
+- +Y is up
+- +X is right
+- +Z is forward
+
+It is not strictly necessary to follow this convention. However, if you choose to use a different coordinate system, or a unit of measure other than meters, your documentation should clearly state how and why you deviate from these defaults.
+
+![Unity's left-handed, y-up coordinate system](coord.png)
+
 ## Usage Examples
 
 Create and save a basic XROR file:
