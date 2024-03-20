@@ -5,7 +5,7 @@ dir = os.path.dirname(os.path.abspath(__file__))
 sys.path.append(dir)
 os.chdir(dir)
 
-from src.xror import XROR
+from xror.xror import XROR
 import numpy as np
 
 def test_bsor():

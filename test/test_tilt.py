@@ -3,7 +3,7 @@ import os
 from deepdiff import DeepDiff
 sys.path.append('../')
 
-from src.xror import XROR
+from xror.xror import XROR
 import numpy as np
 
 def test_tilt():
